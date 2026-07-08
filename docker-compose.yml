@@ -1,0 +1,115 @@
+services:
+  evolution-api:
+    image: evoapicloud/evolution-api:latest
+    container_name: whatsapp-evolution-api
+    restart: unless-stopped
+    ports:
+      - "${EVOLUTION_HOST_PORT:-18080}:8080"
+    environment:
+      SERVER_URL: ${EVOLUTION_SERVER_URL:-http://localhost:18080}
+      AUTHENTICATION_TYPE: ${EVOLUTION_AUTHENTICATION_TYPE:-apikey}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:-change-me}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: ${EVOLUTION_AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES:-true}
+      LOG_LEVEL: ${EVOLUTION_LOG_LEVEL:-ERROR,WARN,INFO,LOG,WEBHOOKS}
+      CORS_ORIGIN: ${EVOLUTION_CORS_ORIGIN:-*}
+      CORS_METHODS: ${EVOLUTION_CORS_METHODS:-GET,POST,PUT,DELETE}
+      CORS_CREDENTIALS: ${EVOLUTION_CORS_CREDENTIALS:-true}
+      CONFIG_SESSION_PHONE_CLIENT: ${EVOLUTION_SESSION_PHONE_CLIENT:-Evolution API}
+      CONFIG_SESSION_PHONE_NAME: ${EVOLUTION_SESSION_PHONE_NAME:-Chrome}
+      WEBHOOK_GLOBAL_ENABLED: ${EVOLUTION_WEBHOOK_GLOBAL_ENABLED:-true}
+      WEBHOOK_GLOBAL_URL: ${EVOLUTION_WEBHOOK_URL:-http://backend:5000/webhook/whatsapp}
+      WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS: ${EVOLUTION_WEBHOOK_GLOBAL_WEBHOOK_BY_EVENTS:-false}
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: ${EVOLUTION_WEBHOOK_EVENTS_MESSAGES_UPSERT:-true}
+      WEBHOOK_EVENTS_CONNECTION_UPDATE: ${EVOLUTION_WEBHOOK_EVENTS_CONNECTION_UPDATE:-true}
+      DATABASE_ENABLED: ${DATABASE_ENABLED:-true}
+      DATABASE_PROVIDER: ${DATABASE_PROVIDER:-postgresql}
+      DATABASE_CONNECTION_URI: ${DATABASE_CONNECTION_URI:-postgresql://postgres:postgres@evolution-postgres:5432/evolution_db?schema=evolution_api}
+      DATABASE_CONNECTION_CLIENT_NAME: ${DATABASE_CONNECTION_CLIENT_NAME:-evolution_exchange}
+      DATABASE_SAVE_DATA_INSTANCE: ${DATABASE_SAVE_DATA_INSTANCE:-true}
+      DATABASE_SAVE_DATA_NEW_MESSAGE: ${DATABASE_SAVE_DATA_NEW_MESSAGE:-true}
+      DATABASE_SAVE_MESSAGE_UPDATE: ${DATABASE_SAVE_MESSAGE_UPDATE:-true}
+      DATABASE_SAVE_DATA_CONTACTS: ${DATABASE_SAVE_DATA_CONTACTS:-true}
+      DATABASE_SAVE_DATA_CHATS: ${DATABASE_SAVE_DATA_CHATS:-true}
+      DATABASE_SAVE_DATA_LABELS: ${DATABASE_SAVE_DATA_LABELS:-true}
+      DATABASE_SAVE_DATA_HISTORIC: ${DATABASE_SAVE_DATA_HISTORIC:-true}
+      CACHE_REDIS_ENABLED: ${EVOLUTION_CACHE_REDIS_ENABLED:-true}
+      CACHE_REDIS_URI: ${EVOLUTION_CACHE_REDIS_URI:-redis://redis:6379}
+      CACHE_REDIS_PREFIX_KEY: ${EVOLUTION_CACHE_REDIS_PREFIX_KEY:-evolution}
+      CACHE_REDIS_SAVE_INSTANCES: ${EVOLUTION_CACHE_REDIS_SAVE_INSTANCES:-false}
+      CACHE_LOCAL_ENABLED: ${EVOLUTION_CACHE_LOCAL_ENABLED:-false}
+    volumes:
+      - evolution_instances:/evolution/instances
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - evolution-postgres
+      - redis
+
+  backend:
+    image: python:3.12-slim
+    container_name: whatsapp-agent-backend
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "${APP_HOST_PORT:-15000}:5000"
+    environment:
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-5000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      EVOLUTION_API_BASE_URL: ${EVOLUTION_API_BASE_URL:-http://evolution-api:8080}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-change-me}
+      EVOLUTION_WEBHOOK_URL: ${EVOLUTION_WEBHOOK_URL:-http://backend:5000/webhook/whatsapp}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://host.docker.internal:11435/v1}
+      LLM_MODEL: ${LLM_MODEL:-qwen3:latest}
+      MEMORY_MAX_MESSAGES: ${MEMORY_MAX_MESSAGES:-20}
+    volumes:
+      - ./:/app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             uvicorn app.main:app --host $${APP_HOST:-0.0.0.0} --port $${APP_PORT:-5000} --reload"
+    depends_on:
+      - evolution-api
+      - ollama-proxy
+
+  ollama-proxy:
+    image: python:3.12-slim
+    container_name: whatsapp-ollama-proxy
+    restart: unless-stopped
+    network_mode: host
+    working_dir: /app
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      OLLAMA_PROXY_LISTEN_HOST: 0.0.0.0
+      OLLAMA_PROXY_LISTEN_PORT: 11435
+      OLLAMA_PROXY_TARGET_HOST: 127.0.0.1
+      OLLAMA_PROXY_TARGET_PORT: 11434
+    volumes:
+      - ./:/app
+    command: python scripts/ollama_proxy.py
+
+  redis:
+    image: redis:7-alpine
+    container_name: whatsapp-agent-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - evolution_redis:/data
+
+  evolution-postgres:
+    image: postgres:15-alpine
+    container_name: whatsapp-evolution-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE:-evolution_db}
+      POSTGRES_USER: ${POSTGRES_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - evolution_postgres:/var/lib/postgresql/data
+
+volumes:
+  evolution_instances:
+  evolution_redis:
+  evolution_postgres:
