@@ -402,6 +402,25 @@ async def instance_qr_page(instance: str) -> HTMLResponse:
         background: #fff;
         cursor: pointer;
       }}
+      .actions {{
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 16px;
+      }}
+      .actions button {{
+        margin-top: 0;
+      }}
+      .danger {{
+        border-color: #d92d20;
+        color: #b42318;
+      }}
+      .hint {{
+        margin-top: 10px;
+        color: #667085;
+        font-size: 13px;
+      }}
     </style>
   </head>
   <body>
@@ -414,7 +433,13 @@ async def instance_qr_page(instance: str) -> HTMLResponse:
       </div>
       <p>WhatsApp > Bağlı Cihazlar > Cihaz Bağla</p>
       <p>QR okunduktan sonra bu sayfayı kapat. Yeni QR sadece gerekirse manuel alınır.</p>
-      <button id="refreshButton" type="button" onclick="refreshQr()">Yeni QR Al</button>
+      <div class="actions">
+        <button id="refreshButton" type="button" onclick="refreshQr()">Yeni QR Al</button>
+        <form method="post" action="/instances/{safe_instance}/logout" onsubmit="return confirmLogout()">
+          <button class="danger" id="logoutButton" type="submit">Bağlantıyı Kes</button>
+        </form>
+      </div>
+      <div class="hint">Yanlış hesap bağlıysa bağlantıyı kesip yeni QR okut.</div>
     </main>
     <script>
       const instance = "{safe_instance}";
@@ -423,6 +448,7 @@ async def instance_qr_page(instance: str) -> HTMLResponse:
       const qrEl = document.getElementById("qr");
       const qrWrapEl = document.getElementById("qrWrap");
       const refreshButton = document.getElementById("refreshButton");
+      const logoutButton = document.getElementById("logoutButton");
       let qrLocked = false;
       let statusTimer = null;
 
@@ -442,6 +468,15 @@ async def instance_qr_page(instance: str) -> HTMLResponse:
         refreshButton.textContent = "QR durduruldu";
         const owner = summary.profileName || summary.ownerPhone || summary.ownerJid || "bilinmiyor";
         ownerEl.textContent = `Bağlanan hesap: ${{owner}}`;
+      }}
+
+      function confirmLogout() {{
+        if (!confirm("WhatsApp bağlantısı kesilsin mi?")) {{
+          return false;
+        }}
+        logoutButton.disabled = true;
+        logoutButton.textContent = "Kesiliyor...";
+        return true;
       }}
 
       async function pollStatus() {{
