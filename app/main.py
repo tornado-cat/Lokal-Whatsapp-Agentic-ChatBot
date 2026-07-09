@@ -270,6 +270,10 @@ async def logout_instance(instance: str) -> RedirectResponse:
     try:
         await evolution_client.logout_instance(instance)
     except httpx.HTTPStatusError as exc:
+        response_text = exc.response.text
+        if exc.response.status_code == 400 and "not connected" in response_text.lower():
+            logger.info("Evolution instance=%s was already disconnected", instance)
+            return RedirectResponse(url=f"/instances/{instance}/qr", status_code=303)
         raise _handle_evolution_status_error(exc) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -280,7 +284,8 @@ async def logout_instance(instance: str) -> RedirectResponse:
 async def instance_qr_png(instance: str) -> Response:
     try:
         summary = await get_instance_summary(instance)
-        if summary["connected"] or summary["qrScanned"]:
+        qr_waiting_for_connection = summary["qrScanned"] and summary["state"] != "close"
+        if summary["connected"] or qr_waiting_for_connection:
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -488,7 +493,8 @@ async def instance_qr_page(instance: str) -> HTMLResponse:
           if (data.ownerPhone && data.state === "close") {{
             ownerEl.textContent = `Son bağlı hesap: ${{data.profileName || data.ownerPhone || data.ownerJid}}`;
           }}
-          if (data.connected || data.qrScanned) {{
+          const qrWaitingForConnection = data.qrScanned && data.state !== "close";
+          if (data.connected || qrWaitingForConnection) {{
             stopQr(data);
           }}
           if (data.connected) {{
