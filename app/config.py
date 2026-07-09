@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
     app_port: int = Field(default=5000, alias="APP_PORT")
+    app_timezone: str = Field(default="Europe/Istanbul", alias="APP_TIMEZONE")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
     evolution_api_base_url: str = Field(
@@ -21,13 +22,24 @@ class Settings(BaseSettings):
 
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
-    llm_model: str = Field(default="gpt-4.1-mini", alias="LLM_MODEL")
+    llm_model: str = Field(default="qwen3:32b", alias="LLM_MODEL")
+    llm_temperature: float = Field(default=0.2, alias="LLM_TEMPERATURE")
+    llm_thinking_enabled: bool = Field(default=False, alias="LLM_THINKING_ENABLED")
     agent_system_prompt_path: str = Field(
         default="prompts/system_prompt.md",
         alias="AGENT_SYSTEM_PROMPT_PATH",
     )
 
     memory_max_messages: int = Field(default=20, alias="MEMORY_MAX_MESSAGES")
+    message_batch_delay_seconds: float = Field(
+        default=3.0,
+        alias="MESSAGE_BATCH_DELAY_SECONDS",
+    )
+    agent_max_reply_words: int = Field(default=18, alias="AGENT_MAX_REPLY_WORDS")
+    chatbot_database_url: str = Field(
+        default="sqlite+aiosqlite:///./data/chatbot.db",
+        alias="CHATBOT_DATABASE_URL",
+    )
 
     @property
     def allowed_sender_set(self) -> set[str]:

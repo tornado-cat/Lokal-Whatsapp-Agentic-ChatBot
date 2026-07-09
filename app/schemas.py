@@ -13,7 +13,7 @@ class ParsedMessage(BaseModel):
 
 
 class MemoryMessage(BaseModel):
-    role: Literal["user", "assistant", "tool"]
+    role: Literal["system", "user", "assistant", "tool"]
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     tool_name: str | None = None
@@ -23,6 +23,7 @@ class SessionState(BaseModel):
     tenant_id: str
     phone: str
     memory: list[MemoryMessage] = Field(default_factory=list)
+    facts: dict[str, str] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -47,6 +48,17 @@ class SendMessageResponse(BaseModel):
     status: str
     instance: str
     phone: str
+
+
+class AgentToolCall(BaseModel):
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentReply(BaseModel):
+    text: str
+    tools_used: list[AgentToolCall] = Field(default_factory=list)
 
 
 ToolResult = dict[str, Any]

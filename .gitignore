@@ -12,5 +12,7 @@ env/
 *.log
 *.sqlite
 *.db
+data/
+postgresql:/
 tenant-*-qr.png
 .DS_Store

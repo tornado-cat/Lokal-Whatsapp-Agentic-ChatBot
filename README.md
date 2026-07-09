@@ -27,15 +27,18 @@ cp .env.example .env
 
 ```env
 EVOLUTION_API_KEY=change-me
+APP_TIMEZONE=Europe/Istanbul
 OPENAI_API_KEY=
 LLM_BASE_URL=http://host.docker.internal:11435/v1
-LLM_MODEL=qwen3:latest
+LLM_MODEL=qwen3:32b
+LLM_TEMPERATURE=0.2
+LLM_THINKING_ENABLED=false
 ```
 
-Varsayılan lokal LLM ayarı Ollama üzerindeki `qwen3:latest` modelidir. Host makinede Ollama kullanıyorsan modelin yüklü olduğundan emin ol:
+Varsayılan lokal LLM ayarı Ollama üzerindeki `qwen3:32b` modelidir. Temperature `0.2` olarak ayarlanır ve Qwen düşünme modu kapalı gönderilir. Backend, `LLM_BASE_URL` ile lokal Ollama kullanırken düşünme modunu gerçekten kapatabilmek için Ollama'nın native `/api/chat` endpoint'ini kullanır. Host makinede Ollama kullanıyorsan modelin yüklü olduğundan emin ol:
 
 ```bash
-ollama pull qwen3:latest
+ollama pull qwen3:32b
 ```
 
 Backend Docker container içinde çalıştığı için compose içinde `ollama-proxy` servisi vardır. Bu servis host ağında `11435` portunu açar ve host'taki Ollama `127.0.0.1:11434` adresine forward eder. Bu yüzden backend varsayılan olarak şunu kullanır:
@@ -78,7 +81,7 @@ curl http://localhost:11435/v1/models
 docker compose exec backend python -c "import httpx; print(httpx.get('http://host.docker.internal:11435/v1/models').status_code)"
 ```
 
-OpenAI kullanacaksan `OPENAI_API_KEY` girip `LLM_BASE_URL` değerini boş bırakabilirsin. Ollama, LM Studio, vLLM gibi OpenAI-compatible lokal endpoint kullanacaksan `LLM_BASE_URL` ve `LLM_MODEL` değerlerini değiştir. İkisi de boşsa backend lokal fallback modunda çalışır.
+OpenAI kullanacaksan `OPENAI_API_KEY` girip `LLM_BASE_URL` değerini boş bırakabilirsin. Ollama, LM Studio, vLLM gibi OpenAI-compatible lokal endpoint kullanacaksan `LLM_BASE_URL`, `LLM_MODEL`, `LLM_TEMPERATURE` ve `LLM_THINKING_ENABLED` değerlerini değiştir. İkisi de boşsa backend lokal fallback modunda çalışır.
 
 ## Docker ile Çalıştırma
 
@@ -298,6 +301,40 @@ Prompt değişikliğinden sonra backend'i yeniden başlat:
 docker compose restart backend
 ```
 
+## Günlük Açılış Mesajı
+
+Her müşteri için günün ilk mesajından sonra asistan cevabının başına şu açılış eklenir:
+
+```text
+Agrovech tarafından geliştirilen AgroBoy sizinle konuşmaya hazır. Bugün size nasıl yardımcı olabilir?
+```
+
+Bu kontrol `session_key = "{tenant_id}:{phone}"` ve `APP_TIMEZONE` üzerinden yapılır. Aynı müşteri aynı gün tekrar yazarsa açılış mesajı tekrar eklenmez; farklı müşteri veya farklı tenant için ayrı hesaplanır.
+
+```env
+APP_TIMEZONE=Europe/Istanbul
+```
+
+## Mesaj Birleştirme ve Kelime Sınırı
+
+Aynı müşteri kısa kısa peş peşe mesaj atarsa backend hemen cevap vermez; son mesajdan sonra kısa süre bekler ve o aralıkta gelenleri tek bağlam olarak işler. Böylece `Hay`, `Sldkk`, `Berkai` gibi ardışık mesajlara üç ayrı cevap dönmez.
+
+`.env`:
+
+```env
+MESSAGE_BATCH_DELAY_SECONDS=3
+AGENT_MAX_REPLY_WORDS=18
+```
+
+- `MESSAGE_BATCH_DELAY_SECONDS`: Aynı `tenant:phone` session'ı için son mesajdan sonra kaç saniye bekleneceği.
+- `AGENT_MAX_REPLY_WORDS`: WhatsApp'a gönderilecek final cevabın maksimum kelime sayısı.
+
+Bu ayarları değiştirdikten sonra backend'i yeniden başlat:
+
+```bash
+docker compose restart backend
+```
+
 ## Multi-Session Memory
 
 Memory in-memory dictionary üzerinde tutulur:
@@ -306,7 +343,49 @@ Memory in-memory dictionary üzerinde tutulur:
 - Aynı telefon + farklı instance farklı tenant session'ı açar.
 - Farklı telefonların memory'si karışmaz.
 - Her session için `MEMORY_MAX_MESSAGES` kadar son mesaj saklanır.
-- Her session'ın `asyncio.Lock` nesnesi vardır; aynı kullanıcıdan hızlı gelen mesajlar sırayla işlenir.
+- Her session'ın `asyncio.Lock` nesnesi vardır; batch sonrası oluşan tek bağlam sırayla işlenir.
+
+## Conversation Database
+
+Kullanıcı mesajları, asistan cevapları ve kullanılan tool kayıtları SQLite veritabanına yazılır.
+
+`.env`:
+
+```env
+CHATBOT_DATABASE_URL=sqlite+aiosqlite:///./data/chatbot.db
+```
+
+Oluşan dosya:
+
+```text
+data/chatbot.db
+```
+
+Tablolar:
+
+- `conversation_turns`: session, tenant, telefon, kullanıcı mesajı, asistan cevabı, message id.
+- `tool_calls`: her turn için kullanılan tool adı, arguments ve result JSON.
+- `user_facts`: aynı `tenant:phone` session'ı için kalıcı kullanıcı bilgileri. Örneğin kullanıcı "benim adım Berkay" dediyse `name=Berkay` saklanır.
+
+Kayıtları görmek:
+
+```bash
+curl "http://localhost:15000/conversations?limit=20"
+```
+
+Belirli session:
+
+```bash
+curl "http://localhost:15000/conversations?session_key=tenant-a:905551112233"
+```
+
+Kullanıcı fact kayıtları:
+
+```bash
+curl "http://localhost:15000/facts?session_key=tenant-a:905551112233"
+```
+
+Memory izolasyonu `session_key = "{tenant_id}:{phone}"` ile yapılır. Aynı telefon farklı Evolution instance içinde farklı session olarak saklanır; farklı müşterilerin adı, geçmişi ve tool sonuçları karışmaz.
 
 ## Production'a Taşırken
 
